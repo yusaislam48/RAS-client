@@ -1,0 +1,170 @@
+.edit-project-container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.edit-project-container h2 {
+  margin-bottom: 20px;
+  color: #333;
+}
+
+.edit-project-form {
+  background-color: #fff;
+  padding: 25px;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+  color: #444;
+}
+
+.form-group input,
+.form-group textarea,
+.form-group select {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.form-group textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.cancel-btn {
+  padding: 10px 15px;
+  background-color: #f5f5f5;
+  color: #333;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.update-btn {
+  padding: 10px 15px;
+  background-color: #009688;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.update-btn:hover {
+  background-color: #00877a;
+}
+
+.cancel-btn:hover {
+  background-color: #eaeaea;
+}
+
+.loading {
+  text-align: center;
+  padding: 40px;
+  font-size: 16px;
+  color: #666;
+}
+
+.project-users-section {
+  margin-top: 30px;
+}
+
+.users-list {
+  margin-bottom: 15px;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid #eee;
+  border-radius: 4px;
+  padding: 10px;
+}
+
+.users-list ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.user-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.user-item:last-child {
+  border-bottom: none;
+}
+
+.remove-user-btn {
+  background-color: #f44336;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.remove-user-btn:hover {
+  background-color: #d32f2f;
+}
+
+.add-user-btn {
+  background-color: #2196f3;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 15px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.add-user-btn:hover {
+  background-color: #1976d2;
+}
+
+.add-user-form {
+  margin-top: 15px;
+  padding: 15px;
+  background-color: #f9f9f9;
+  border-radius: 4px;
+}
+
+.add-user-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.add-btn {
+  background-color: #4caf50;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 15px;
+  cursor: pointer;
+}
+
+.add-btn:hover {
+  background-color: #43a047;
+} 

@@ -1,4 +1,4 @@
-import React, { createContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useState, useEffect, ReactNode, useContext } from 'react';
 import axiosInstance from '../utils/axiosConfig';
 
 interface User {
@@ -66,6 +66,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       
       // Save to localStorage
       localStorage.setItem('user', JSON.stringify(userData));
+      localStorage.setItem('userId', userData._id);
       
       // Auth header will be added by axios interceptor
     } catch (error) {
@@ -86,6 +87,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     } finally {
       // Remove user from localStorage
       localStorage.removeItem('user');
+      localStorage.removeItem('userId');
       
       // Auth headers will be handled by axios interceptor
       
@@ -114,4 +116,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       {children}
     </AuthContext.Provider>
   );
+};
+
+// Create a custom hook to use the auth context
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
 }; 
