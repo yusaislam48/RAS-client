@@ -34,6 +34,7 @@ const DashboardLayout: React.FC = () => {
     { name: 'Sensor Data', href: '/sensor-data', icon: ChartBarIcon, current: false, forAll: true },
     { name: 'Users', href: '/users', icon: UserGroupIcon, current: false, forAdmin: true },
     { name: 'Register User', href: '/register', icon: UserIcon, current: false, forSuperAdmin: true },
+    { name: 'Sensor Thresholds', href: '/thresholds', icon: CogIcon, current: false, forSuperAdmin: true },
   ];
 
   const userNavigation = [

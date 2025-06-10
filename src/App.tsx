@@ -18,9 +18,11 @@ import ProjectForm from './pages/ProjectForm';
 import Devices from './pages/Devices';
 import DeviceDetails from './pages/DeviceDetails';
 import DeviceForm from './pages/DeviceForm';
+import DeviceDashboard from './pages/DeviceDashboard';
 import SensorData from './pages/SensorData';
 import UserManagement from './pages/UserManagement';
 import Profile from './pages/Profile';
+import ThresholdManagement from './pages/ThresholdManagement';
 
 // Auth Provider
 import { AuthProvider } from './context/AuthContext';
@@ -53,6 +55,8 @@ function App() {
             <Route path="devices/new" element={<AdminRoute><DeviceForm /></AdminRoute>} />
             <Route path="devices/:id" element={<DeviceDetails />} />
             <Route path="devices/:id/edit" element={<AdminRoute><DeviceForm /></AdminRoute>} />
+            <Route path="devices/:id/data" element={<SensorData />} />
+            <Route path="devices/:id/dashboard" element={<DeviceDashboard />} />
             
             <Route path="sensor-data" element={<SensorData />} />
             <Route path="profile" element={<Profile />} />
@@ -62,6 +66,7 @@ function App() {
             
             {/* Super Admin Routes */}
             <Route path="register" element={<SuperAdminRoute><Register /></SuperAdminRoute>} />
+            <Route path="thresholds" element={<SuperAdminRoute><ThresholdManagement /></SuperAdminRoute>} />
           </Route>
           
           {/* Redirect to dashboard if logged in */}

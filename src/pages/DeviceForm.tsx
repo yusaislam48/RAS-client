@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import axiosInstance from '../utils/axiosConfig';
 import { toast } from 'react-toastify';
 import { AuthContext } from '../context/AuthContext';
+import thresholdService, { SensorThreshold } from '../services/thresholdService';
 
 interface Project {
   _id: string;
@@ -19,18 +20,26 @@ interface DeviceFormData {
   status: string;
 }
 
+interface ThresholdFormData {
+  [key: string]: {
+    idealMin: number;
+    idealMax: number;
+    warningMin: number;
+    warningMax: number;
+    criticalMin: number;
+    criticalMax: number;
+    unit: string;
+  };
+}
+
 const SENSOR_TYPE_OPTIONS = [
   'temperature',
   'pH',
   'dissolvedOxygen',
   'conductivity',
-  'ammonia',
-  'nitrate',
-  'nitrite',
-  'waterLevel',
-  'flowRate',
   'turbidity',
-  'salinity'
+  'orp',
+  'tds'
 ];
 
 const STATUS_OPTIONS = ['online', 'offline', 'maintenance'];
@@ -38,7 +47,7 @@ const STATUS_OPTIONS = ['online', 'offline', 'maintenance'];
 const DeviceForm: React.FC = () => {
   const { id, projectId } = useParams();
   const navigate = useNavigate();
-  const { isAdmin } = useContext(AuthContext);
+  const { isAdmin, isSuperAdmin } = useContext(AuthContext);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState<DeviceFormData>({
@@ -50,6 +59,11 @@ const DeviceForm: React.FC = () => {
     sensorTypes: [],
     status: 'online'
   });
+  
+  // State for thresholds
+  const [defaultThresholds, setDefaultThresholds] = useState<SensorThreshold[]>([]);
+  const [deviceThresholds, setDeviceThresholds] = useState<ThresholdFormData>({});
+  const [selectedSensorForThreshold, setSelectedSensorForThreshold] = useState<string>('');
 
   const isEditMode = !!id;
 
@@ -61,12 +75,43 @@ const DeviceForm: React.FC = () => {
       return;
     }
     
+    console.log('User is admin, can access device form');
+    
     const fetchData = async () => {
       setLoading(true);
       try {
         // Fetch available projects for dropdown
-        const projectsResponse = await axiosInstance.get('/api/projects/my-projects');
+        // Using regular projects endpoint for super admins to see all projects
+        const projectsEndpoint = '/api/projects';
+        const projectsResponse = await axiosInstance.get(projectsEndpoint);
+        console.log('Projects fetched:', projectsResponse.data);
         setProjects(projectsResponse.data);
+        
+        // Fetch default thresholds
+        let thresholdDefaults: ThresholdFormData = {};
+        
+        try {
+          const defaultThresholdsData = await thresholdService.getDefaultThresholds();
+          console.log('Default thresholds fetched:', defaultThresholdsData);
+          setDefaultThresholds(defaultThresholdsData);
+          
+          // Initialize device thresholds with defaults
+          defaultThresholdsData.forEach(threshold => {
+            thresholdDefaults[threshold.sensorType] = {
+              idealMin: threshold.idealMin,
+              idealMax: threshold.idealMax,
+              warningMin: threshold.warningMin,
+              warningMax: threshold.warningMax,
+              criticalMin: threshold.criticalMin,
+              criticalMax: threshold.criticalMax,
+              unit: threshold.unit
+            };
+          });
+          setDeviceThresholds(thresholdDefaults);
+        } catch (error) {
+          console.error('Error fetching default thresholds:', error);
+          // Continue even if default thresholds can't be loaded
+        }
         
         // If editing, fetch device data
         if (isEditMode) {
@@ -82,6 +127,31 @@ const DeviceForm: React.FC = () => {
             sensorTypes: device.sensorTypes || [],
             status: device.status || 'online'
           });
+          
+          // Fetch device-specific thresholds if they exist
+          try {
+            const deviceThresholdsData = await thresholdService.getDeviceThresholds(id as string);
+            console.log('Device thresholds fetched:', deviceThresholdsData);
+            
+            // Update device thresholds with any custom settings
+            const customThresholds: ThresholdFormData = { ...thresholdDefaults };
+            deviceThresholdsData.forEach(threshold => {
+              customThresholds[threshold.sensorType] = {
+                idealMin: threshold.idealMin,
+                idealMax: threshold.idealMax,
+                warningMin: threshold.warningMin,
+                warningMax: threshold.warningMax,
+                criticalMin: threshold.criticalMin,
+                criticalMax: threshold.criticalMax,
+                unit: threshold.unit
+              };
+            });
+            
+            setDeviceThresholds(customThresholds);
+          } catch (error) {
+            console.error('Error fetching device thresholds:', error);
+            // Continue with defaults
+          }
         }
       } catch (error) {
         console.error('Error fetching data:', error);
@@ -117,6 +187,45 @@ const DeviceForm: React.FC = () => {
       });
     }
   };
+  
+  const handleThresholdChange = (sensorType: string, field: string, value: string) => {
+    setDeviceThresholds(prev => ({
+      ...prev,
+      [sensorType]: {
+        ...prev[sensorType],
+        [field]: parseFloat(value)
+      }
+    }));
+  };
+  
+  const handleUnitChange = (sensorType: string, value: string) => {
+    setDeviceThresholds(prev => ({
+      ...prev,
+      [sensorType]: {
+        ...prev[sensorType],
+        unit: value
+      }
+    }));
+  };
+  
+  const handleResetThreshold = (sensorType: string) => {
+    const defaultThreshold = defaultThresholds.find(t => t.sensorType === sensorType);
+    
+    if (defaultThreshold) {
+      setDeviceThresholds(prev => ({
+        ...prev,
+        [sensorType]: {
+          idealMin: defaultThreshold.idealMin,
+          idealMax: defaultThreshold.idealMax,
+          warningMin: defaultThreshold.warningMin,
+          warningMax: defaultThreshold.warningMax,
+          criticalMin: defaultThreshold.criticalMin,
+          criticalMax: defaultThreshold.criticalMax,
+          unit: defaultThreshold.unit
+        }
+      }));
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -126,15 +235,57 @@ const DeviceForm: React.FC = () => {
       return;
     }
     
+    if (!formData.project) {
+      toast.error('Please select a project');
+      return;
+    }
+    
     try {
+      console.log('Submitting device form with data:', formData);
+      
+      let deviceId: string;
+      
       if (isEditMode) {
         // When editing, we don't send the project ID as it's not allowed to change
         const { project, ...updateData } = formData;
         await axiosInstance.put(`/api/devices/${id}`, updateData);
+        deviceId = id as string;
         toast.success('Device updated successfully');
       } else {
-        await axiosInstance.post('/api/devices', formData);
+        const response = await axiosInstance.post('/api/devices', formData);
+        console.log('Device created:', response.data);
+        deviceId = response.data._id;
         toast.success('Device created successfully');
+      }
+      
+      // Save thresholds for each selected sensor type
+      if (deviceId) {
+        console.log('Saving thresholds for device:', deviceId);
+        const saveThresholdPromises = formData.sensorTypes.map(async (sensorType) => {
+          if (deviceThresholds[sensorType]) {
+            const threshold = {
+              sensorType,
+              idealMin: deviceThresholds[sensorType].idealMin,
+              idealMax: deviceThresholds[sensorType].idealMax,
+              warningMin: deviceThresholds[sensorType].warningMin,
+              warningMax: deviceThresholds[sensorType].warningMax,
+              criticalMin: deviceThresholds[sensorType].criticalMin,
+              criticalMax: deviceThresholds[sensorType].criticalMax,
+              unit: deviceThresholds[sensorType].unit,
+              projectId: formData.project
+            };
+            
+            console.log(`Saving threshold for ${sensorType}:`, threshold);
+            
+            try {
+              await thresholdService.updateDeviceThreshold(deviceId, threshold);
+            } catch (error) {
+              console.error(`Error saving threshold for ${sensorType}:`, error);
+            }
+          }
+        });
+        
+        await Promise.all(saveThresholdPromises);
       }
       
       // Navigate back to the project details page or devices list
@@ -143,9 +294,10 @@ const DeviceForm: React.FC = () => {
       } else {
         navigate('/devices');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving device:', error);
-      toast.error('Failed to save device');
+      const errorMessage = error.response?.data?.message || 'Failed to save device';
+      toast.error(errorMessage);
     }
   };
 
@@ -319,6 +471,151 @@ const DeviceForm: React.FC = () => {
               )}
             </div>
           </div>
+
+          {/* Threshold Settings Section */}
+          {(isSuperAdmin || isAdmin) && formData.sensorTypes.length > 0 && (
+            <div className="mt-6">
+              <div className="border-t border-gray-200 pt-4">
+                <h3 className="text-lg font-medium text-gray-900 mb-4">Sensor Threshold Settings</h3>
+                
+                {/* Sensor Type Selector */}
+                <div className="mb-4">
+                  <label htmlFor="sensorTypeThreshold" className="block text-sm font-medium text-gray-700">
+                    Select Sensor Type to Configure
+                  </label>
+                  <select
+                    id="sensorTypeThreshold"
+                    value={selectedSensorForThreshold}
+                    onChange={(e) => setSelectedSensorForThreshold(e.target.value)}
+                    className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm rounded-md"
+                  >
+                    <option value="">Select a sensor type</option>
+                    {formData.sensorTypes.map(type => (
+                      <option key={type} value={type}>
+                        {type.charAt(0).toUpperCase() + type.slice(1).replace(/([A-Z])/g, ' $1')}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                
+                {/* Threshold Form */}
+                {selectedSensorForThreshold && deviceThresholds[selectedSensorForThreshold] && (
+                  <div className="bg-gray-50 p-4 rounded-md">
+                    <div className="flex justify-between items-center mb-4">
+                      <h4 className="text-md font-medium">
+                        {selectedSensorForThreshold.charAt(0).toUpperCase() + 
+                         selectedSensorForThreshold.slice(1).replace(/([A-Z])/g, ' $1')} Thresholds
+                      </h4>
+                      <button
+                        type="button"
+                        onClick={() => handleResetThreshold(selectedSensorForThreshold)}
+                        className="text-sm text-teal-600 hover:text-teal-800"
+                      >
+                        Reset to Defaults
+                      </button>
+                    </div>
+                    
+                    {/* Unit Setting */}
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-gray-700">
+                        Unit
+                      </label>
+                      <input
+                        type="text"
+                        value={deviceThresholds[selectedSensorForThreshold].unit}
+                        onChange={(e) => handleUnitChange(selectedSensorForThreshold, e.target.value)}
+                        className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm rounded-md"
+                      />
+                    </div>
+                    
+                    {/* Threshold Ranges */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Ideal Range */}
+                      <div className="border-l-4 border-green-500 pl-3">
+                        <h5 className="text-sm font-medium text-gray-700 mb-2">Ideal Range</h5>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-xs text-gray-500">Min</label>
+                            <input
+                              type="number"
+                              step="any"
+                              value={deviceThresholds[selectedSensorForThreshold].idealMin}
+                              onChange={(e) => handleThresholdChange(selectedSensorForThreshold, 'idealMin', e.target.value)}
+                              className="mt-1 block w-full pl-2 pr-2 py-1 text-sm border-gray-300 focus:outline-none focus:ring-teal-500 focus:border-teal-500 rounded-md"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500">Max</label>
+                            <input
+                              type="number"
+                              step="any"
+                              value={deviceThresholds[selectedSensorForThreshold].idealMax}
+                              onChange={(e) => handleThresholdChange(selectedSensorForThreshold, 'idealMax', e.target.value)}
+                              className="mt-1 block w-full pl-2 pr-2 py-1 text-sm border-gray-300 focus:outline-none focus:ring-teal-500 focus:border-teal-500 rounded-md"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Warning Range */}
+                      <div className="border-l-4 border-yellow-500 pl-3">
+                        <h5 className="text-sm font-medium text-gray-700 mb-2">Warning Range</h5>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-xs text-gray-500">Min</label>
+                            <input
+                              type="number"
+                              step="any"
+                              value={deviceThresholds[selectedSensorForThreshold].warningMin}
+                              onChange={(e) => handleThresholdChange(selectedSensorForThreshold, 'warningMin', e.target.value)}
+                              className="mt-1 block w-full pl-2 pr-2 py-1 text-sm border-gray-300 focus:outline-none focus:ring-teal-500 focus:border-teal-500 rounded-md"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500">Max</label>
+                            <input
+                              type="number"
+                              step="any"
+                              value={deviceThresholds[selectedSensorForThreshold].warningMax}
+                              onChange={(e) => handleThresholdChange(selectedSensorForThreshold, 'warningMax', e.target.value)}
+                              className="mt-1 block w-full pl-2 pr-2 py-1 text-sm border-gray-300 focus:outline-none focus:ring-teal-500 focus:border-teal-500 rounded-md"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Critical Range */}
+                      <div className="border-l-4 border-red-500 pl-3 md:col-span-2">
+                        <h5 className="text-sm font-medium text-gray-700 mb-2">Critical Range</h5>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-xs text-gray-500">Min</label>
+                            <input
+                              type="number"
+                              step="any"
+                              value={deviceThresholds[selectedSensorForThreshold].criticalMin}
+                              onChange={(e) => handleThresholdChange(selectedSensorForThreshold, 'criticalMin', e.target.value)}
+                              className="mt-1 block w-full pl-2 pr-2 py-1 text-sm border-gray-300 focus:outline-none focus:ring-teal-500 focus:border-teal-500 rounded-md"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500">Max</label>
+                            <input
+                              type="number"
+                              step="any"
+                              value={deviceThresholds[selectedSensorForThreshold].criticalMax}
+                              onChange={(e) => handleThresholdChange(selectedSensorForThreshold, 'criticalMax', e.target.value)}
+                              className="mt-1 block w-full pl-2 pr-2 py-1 text-sm border-gray-300 focus:outline-none focus:ring-teal-500 focus:border-teal-500 rounded-md"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           <div className="mt-6 flex items-center justify-end space-x-3">
             <button
