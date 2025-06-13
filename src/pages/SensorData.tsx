@@ -757,7 +757,7 @@ const SensorData: React.FC = () => {
                   <div className="w-4 h-4 rounded-full bg-[rgb(255,159,64)] mr-2"></div>
                   <span className="text-sm">
                     <span className="font-medium">Warning Range: </span>
-                    {thresholds.warningMin} - {thresholds.warningMax} {unit}
+                    &lt;{thresholds.warningMin} or &gt;{thresholds.warningMax} {unit}
                   </span>
                 </div>
                 <div className="flex items-center">

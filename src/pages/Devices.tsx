@@ -43,8 +43,19 @@ const Devices: React.FC = () => {
         const projectsResponse = await axiosInstance.get('/api/projects/my-projects');
         setProjects(projectsResponse.data);
         
+        // Check if user is superadmin from localStorage
+        const userStr = localStorage.getItem('user');
+        const user = userStr ? JSON.parse(userStr) : null;
+        const isSuperAdmin = user?.role === 'superadmin';
+        
         // Fetch all accessible devices
-        const devicesResponse = await axiosInstance.get('/api/devices');
+        // For superadmin, use projectSpecific=true to filter by project
+        const devicesResponse = await axiosInstance.get('/api/devices', {
+          params: {
+            projectSpecific: isSuperAdmin ? 'true' : undefined,
+            projectId: filters.projectId || undefined
+          }
+        });
         setDevices(devicesResponse.data);
       } catch (error) {
         console.error('Error fetching devices:', error);
@@ -55,7 +66,7 @@ const Devices: React.FC = () => {
     };
 
     fetchData();
-  }, []);
+  }, [filters.projectId]);
 
   const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -63,6 +74,18 @@ const Devices: React.FC = () => {
       ...prev,
       [name]: value
     }));
+    
+    // If changing project and user is superadmin, refetch devices
+    if (name === 'projectId') {
+      const userStr = localStorage.getItem('user');
+      const user = userStr ? JSON.parse(userStr) : null;
+      const isSuperAdmin = user?.role === 'superadmin';
+      
+      if (isSuperAdmin) {
+        // Will trigger the useEffect due to dependency on filters.projectId
+        console.log('SuperAdmin selected project:', value);
+      }
+    }
   };
 
   const handleDeleteDevice = async (deviceId: string) => {

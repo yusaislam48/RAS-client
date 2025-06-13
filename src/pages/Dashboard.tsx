@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { Link } from 'react-router-dom';
 import axiosInstance from '../utils/axiosConfig';
+import { toast } from 'react-toastify';
 import { AuthContext } from '../context/AuthContext';
+import io from 'socket.io-client';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -13,7 +15,6 @@ import {
   Legend,
 } from 'chart.js';
 import { Line } from 'react-chartjs-2';
-import io from 'socket.io-client';
 
 // Register ChartJS components
 ChartJS.register(
@@ -29,17 +30,19 @@ ChartJS.register(
 interface Project {
   _id: string;
   name: string;
-  description?: string;
-  location?: string;
+  description: string;
+  location: string;
 }
 
 interface Device {
   _id: string;
   name: string;
+  status: string;
   deviceId: string;
-  status: 'online' | 'offline' | 'maintenance';
-  lastSeen?: Date;
-  project: string;
+  project: {
+    _id: string;
+    name: string;
+  };
 }
 
 interface SensorData {
@@ -54,11 +57,13 @@ interface SensorData {
 }
 
 const Dashboard: React.FC = () => {
-  const { user } = useContext(AuthContext);
+  const { isSuperAdmin } = useContext(AuthContext);
   const [projects, setProjects] = useState<Project[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
   const [recentData, setRecentData] = useState<SensorData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
   const [socket, setSocket] = useState<any>(null);
 
   // Connect to WebSocket
@@ -98,35 +103,42 @@ const Dashboard: React.FC = () => {
     };
   }, [socket, projects]);
 
-  // Fetch initial data
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchDashboardData = async () => {
+      setLoading(true);
+      setError(null);
+      
       try {
-        setLoading(true);
+        // Use Promise.all to fetch data concurrently
+        const [projectsResponse, devicesResponse, recentDataResponse] = await Promise.all([
+          axiosInstance.get('/api/projects/my-projects'),
+          axiosInstance.get('/api/devices'),
+          axiosInstance.get('/api/sensor-data/recent')
+        ]);
         
-        // Fetch user's projects
-        const projectsRes = await axiosInstance.get('/api/projects/my-projects');
-        setProjects(projectsRes.data);
-        
-        // If there are projects, fetch devices
-        if (projectsRes.data.length > 0) {
-          const projectIds = projectsRes.data.map((p: Project) => p._id).join(',');
-          const devicesRes = await axiosInstance.get(`/api/devices?projects=${projectIds}`);
-          setDevices(devicesRes.data);
-          
-          // Fetch recent sensor data
-          const dataRes = await axiosInstance.get(`/api/sensor-data/recent?projects=${projectIds}`);
-          setRecentData(dataRes.data);
-        }
+        setProjects(projectsResponse.data);
+        setDevices(devicesResponse.data);
+        setRecentData(recentDataResponse.data || []);
+        setLoading(false);
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
-      } finally {
+        setError('Failed to load dashboard data. Please try again.');
         setLoading(false);
+        
+        // Auto-retry up to 3 times with exponential backoff
+        if (retryCount < 3) {
+          const timeout = Math.pow(2, retryCount) * 1000;
+          setTimeout(() => {
+            setRetryCount(prev => prev + 1);
+          }, timeout);
+        } else {
+          toast.error('Failed to load dashboard data after multiple attempts. Please refresh the page.');
+        }
       }
     };
 
-    fetchData();
-  }, []);
+    fetchDashboardData();
+  }, [retryCount]);
 
   // Prepare chart data for temperature readings
   const temperatureData = {
@@ -147,171 +159,223 @@ const Dashboard: React.FC = () => {
     ],
   };
 
-  // Count devices by status
-  const deviceStatusCounts = {
-    online: devices.filter(d => d.status === 'online').length,
-    offline: devices.filter(d => d.status === 'offline').length,
-    maintenance: devices.filter(d => d.status === 'maintenance').length
+  // Calculate statistics
+  const totalProjects = projects.length;
+  const totalDevices = devices.length;
+  const onlineDevices = devices.filter(device => device.status === 'online').length;
+  const offlineDevices = devices.filter(device => device.status === 'offline').length;
+  const alertCount = recentData.filter(data => data.isAlert).length;
+  
+  const handleRetry = () => {
+    setRetryCount(0); // Reset retry count to trigger a new fetch
   };
 
-  // Count alerts
-  const alertCount = recentData.filter(data => data.isAlert).length;
-
   if (loading) {
-    return <div className="flex justify-center items-center h-64">Loading dashboard data...</div>;
+    return (
+      <div className="flex justify-center items-center h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-500"></div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64">
+        <p className="text-red-500 mb-4">{error}</p>
+        <button 
+          onClick={handleRetry}
+          className="px-4 py-2 bg-teal-600 text-white rounded hover:bg-teal-700"
+        >
+          Retry
+        </button>
+      </div>
+    );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        {/* Projects Card */}
-        <div className="bg-white overflow-hidden shadow rounded-lg">
-          <div className="px-4 py-5 sm:p-6">
-            <dt className="text-sm font-medium text-gray-500 truncate">Total Projects</dt>
-            <dd className="mt-1 text-3xl font-semibold text-gray-900">{projects.length}</dd>
-          </div>
-          <div className="bg-gray-50 px-4 py-4 sm:px-6">
-            <div className="text-sm">
-              <Link to="/projects" className="font-medium text-teal-600 hover:text-teal-500">
-                View all projects
-              </Link>
-            </div>
-          </div>
+    <div className="container mx-auto px-4">
+      <h1 className="text-2xl font-bold text-gray-900 mb-6">Dashboard</h1>
+      
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div className="bg-white p-4 rounded-lg shadow">
+          <h3 className="text-sm font-medium text-gray-500">Total Projects</h3>
+          <p className="text-2xl font-bold text-teal-600">{totalProjects}</p>
         </div>
-
-        {/* Devices Card */}
-        <div className="bg-white overflow-hidden shadow rounded-lg">
-          <div className="px-4 py-5 sm:p-6">
-            <dt className="text-sm font-medium text-gray-500 truncate">Total Devices</dt>
-            <dd className="mt-1 text-3xl font-semibold text-gray-900">{devices.length}</dd>
-          </div>
-          <div className="px-4 py-2">
-            <div className="flex justify-between text-sm">
-              <span className="text-green-600">{deviceStatusCounts.online} Online</span>
-              <span className="text-gray-500">{deviceStatusCounts.offline} Offline</span>
-              <span className="text-yellow-500">{deviceStatusCounts.maintenance} Maintenance</span>
-            </div>
-          </div>
-          <div className="bg-gray-50 px-4 py-4 sm:px-6">
-            <div className="text-sm">
-              <Link to="/devices" className="font-medium text-teal-600 hover:text-teal-500">
-                View all devices
-              </Link>
-            </div>
-          </div>
+        <div className="bg-white p-4 rounded-lg shadow">
+          <h3 className="text-sm font-medium text-gray-500">Total Devices</h3>
+          <p className="text-2xl font-bold text-teal-600">{totalDevices}</p>
         </div>
-
-        {/* Alerts Card */}
-        <div className="bg-white overflow-hidden shadow rounded-lg">
-          <div className="px-4 py-5 sm:p-6">
-            <dt className="text-sm font-medium text-gray-500 truncate">Active Alerts</dt>
-            <dd className="mt-1 text-3xl font-semibold text-red-600">{alertCount}</dd>
-          </div>
-          <div className="bg-gray-50 px-4 py-4 sm:px-6">
-            <div className="text-sm">
-              <Link to="/sensor-data?filter=alerts" className="font-medium text-teal-600 hover:text-teal-500">
-                View all alerts
-              </Link>
-            </div>
-          </div>
+        <div className="bg-white p-4 rounded-lg shadow">
+          <h3 className="text-sm font-medium text-gray-500">Online Devices</h3>
+          <p className="text-2xl font-bold text-green-600">{onlineDevices}</p>
+        </div>
+        <div className="bg-white p-4 rounded-lg shadow">
+          <h3 className="text-sm font-medium text-gray-500">Alerts</h3>
+          <p className="text-2xl font-bold text-red-600">{alertCount}</p>
         </div>
       </div>
-
-      {/* Chart Section */}
-      <div className="bg-white shadow rounded-lg p-6">
-        <h3 className="text-lg font-medium text-gray-900 mb-4">Recent Temperature Readings</h3>
-        <div className="h-64">
-          {recentData.some(data => data.sensorType === 'temperature') ? (
-            <Line 
-              data={temperatureData} 
-              options={{
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                  y: {
-                    beginAtZero: false,
-                  }
-                }
-              }} 
-            />
+      
+      {/* Projects Section */}
+      <div className="mb-8">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-xl font-semibold text-gray-800">Recent Projects</h2>
+          <Link 
+            to="/projects" 
+            className="text-sm text-teal-600 hover:text-teal-800"
+          >
+            View All
+          </Link>
+        </div>
+        
+        {projects.length === 0 ? (
+          <div className="bg-white p-6 rounded-lg shadow text-center">
+            <p className="text-gray-500">No projects found.</p>
+            {isSuperAdmin && (
+              <Link 
+                to="/projects/new" 
+                className="mt-2 inline-block px-4 py-2 bg-teal-600 text-white rounded hover:bg-teal-700"
+              >
+                Create Your First Project
+              </Link>
+            )}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {projects.slice(0, 3).map(project => (
+              <div key={project._id} className="bg-white p-4 rounded-lg shadow">
+                <h3 className="font-medium text-gray-900">{project.name}</h3>
+                <p className="text-sm text-gray-500 mt-1">{project.description || 'No description'}</p>
+                <div className="mt-4">
+                  <Link 
+                    to={`/projects/${project._id}`}
+                    className="text-sm text-teal-600 hover:text-teal-800"
+                  >
+                    View Details
+                  </Link>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      
+      {/* Devices Section */}
+      <div className="mb-8">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-xl font-semibold text-gray-800">Device Status</h2>
+          <Link 
+            to="/devices" 
+            className="text-sm text-teal-600 hover:text-teal-800"
+          >
+            View All
+          </Link>
+        </div>
+        
+        {devices.length === 0 ? (
+          <div className="bg-white p-6 rounded-lg shadow text-center">
+            <p className="text-gray-500">No devices found.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {devices.slice(0, 3).map(device => (
+              <div key={device._id} className="bg-white p-4 rounded-lg shadow">
+                <div className="flex justify-between items-center">
+                  <h3 className="font-medium text-gray-900">{device.name}</h3>
+                  <span className={`px-2 py-1 text-xs rounded-full ${
+                    device.status === 'online' ? 'bg-green-100 text-green-800' : 
+                    device.status === 'offline' ? 'bg-red-100 text-red-800' : 
+                    'bg-yellow-100 text-yellow-800'
+                  }`}>
+                    {device.status}
+                  </span>
+                </div>
+                <p className="text-sm text-gray-500 mt-1">ID: {device.deviceId}</p>
+                <p className="text-sm text-gray-500">Project: {device.project.name}</p>
+                <div className="mt-4">
+                  <Link 
+                    to={`/devices/${device._id}`}
+                    className="text-sm text-teal-600 hover:text-teal-800"
+                  >
+                    View Details
+                  </Link>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      
+      {/* Recent Alerts and Sensor Data */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="bg-white p-4 rounded-lg shadow">
+          <h2 className="text-xl font-semibold text-gray-800 mb-4">Recent Alerts</h2>
+          {recentData.filter(data => data.isAlert).length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
+                    <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Device</th>
+                    <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Sensor</th>
+                    <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Value</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {recentData
+                    .filter(data => data.isAlert)
+                    .slice(0, 5)
+                    .map(alert => {
+                      const device = devices.find(d => d._id === alert.device);
+                      return (
+                        <tr key={alert._id}>
+                          <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-500">
+                            {new Date(alert.timestamp).toLocaleTimeString()}
+                          </td>
+                          <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-900">
+                            {device?.name || 'Unknown'}
+                          </td>
+                          <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-500">
+                            {alert.sensorType}
+                          </td>
+                          <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-500">
+                            {alert.value} {alert.unit}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
           ) : (
-            <div className="flex justify-center items-center h-full text-gray-500">
-              No temperature data available
+            <div className="text-center py-8 text-gray-500">
+              No recent alerts
             </div>
           )}
         </div>
-      </div>
-
-      {/* Recent Data Table */}
-      <div className="bg-white shadow rounded-lg overflow-hidden">
-        <div className="px-4 py-5 sm:px-6">
-          <h3 className="text-lg font-medium text-gray-900">Recent Sensor Readings</h3>
-        </div>
-        <div className="border-t border-gray-200">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Timestamp
-                  </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Device
-                  </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Sensor Type
-                  </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Value
-                  </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Status
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {recentData.slice(-5).map((reading) => {
-                  // Find device name
-                  const device = devices.find(d => d._id === reading.device);
-                  
-                  return (
-                    <tr key={reading._id}>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {new Date(reading.timestamp).toLocaleString()}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                        {device?.name || 'Unknown'}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {reading.sensorType}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {reading.value} {reading.unit}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        {reading.isAlert ? (
-                          <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
-                            Alert
-                          </span>
-                        ) : (
-                          <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
-                            Normal
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-                {recentData.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="px-6 py-4 text-center text-sm text-gray-500">
-                      No sensor data available
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+        
+        <div className="bg-white p-4 rounded-lg shadow">
+          <h2 className="text-xl font-semibold text-gray-800 mb-4">Temperature Readings</h2>
+          {recentData.some(data => data.sensorType === 'temperature') ? (
+            <div className="h-64">
+              <Line 
+                data={temperatureData} 
+                options={{
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  scales: {
+                    y: {
+                      beginAtZero: false,
+                    }
+                  }
+                }} 
+              />
+            </div>
+          ) : (
+            <div className="text-center py-8 text-gray-500">
+              No temperature data available
+            </div>
+          )}
         </div>
       </div>
     </div>

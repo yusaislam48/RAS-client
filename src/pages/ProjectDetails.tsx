@@ -44,8 +44,12 @@ const ProjectDetails: React.FC = () => {
         const projectResponse = await axiosInstance.get(`/api/projects/${id}`);
         setProject(projectResponse.data);
         
-        // Use the correct endpoint to fetch devices by project
-        const devicesResponse = await axiosInstance.get(`/api/devices?project=${id}`);
+        // Use the projects parameter to fetch devices by project
+        const devicesResponse = await axiosInstance.get(`/api/devices`, {
+          params: {
+            projects: id
+          }
+        });
         setDevices(devicesResponse.data);
         
         // Get current user to determine role and permissions
